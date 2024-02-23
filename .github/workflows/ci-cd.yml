@@ -21,6 +21,38 @@ name: CI/CD
       - master
 
 jobs:
+  list-run-scripts:
+    name: Listing Scripts to Test
+    runs-on: ubuntu-latest
+    outputs:
+      paths: ${{ steps.list-run-scripts.outputs.paths }}
+    steps:
+      - name: List Files
+        id: list-run-scripts
+        uses: mirko-felice/list-files-action@v3.0.5
+        with:
+          repo: ${{ github.repository }}
+          ref: ${{ github.ref }}
+          path: "commands"
+          ext: ".sh"
+
+  test-scripts:
+    name: Test All run.sh Scripts
+    outputs:
+      outcome: ${{ job.status }}
+    continue-on-error: true
+    needs: list-run-scripts
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        script: ${{ fromJson(needs.list-run-scripts.outputs.paths) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: ${{ matrix.test-suite.desc }}
+        run: docker run --rm -v $(pwd)/${{ matrix.script }}:/test/script.sh ubuntu /test/script.sh
+
   list-templates:
     name: Listing Templates to Validate
     runs-on: ubuntu-latest
@@ -67,9 +99,9 @@ jobs:
   slack-notification:
     name: Send Slack Notification
     if: ${{ always() }}
-    needs: validate
+    needs: [test-scripts, validate]
     uses: QubitPi/hashicorp-aws/.github/workflows/slack-notification.yml@master
     with:
-      job-status: ${{ needs.validate.outputs.outcome }}
+      job-status: ${{ (needs.test-scripts.outputs.outcome == 'success' && needs.validate.outputs.outcome == 'success') && 'success' || 'failure' }}
     secrets:
       slack-webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
